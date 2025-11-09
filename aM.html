@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Airline Manager -- Deluxe (Map + Log + Repair)</title>
+<style>
+  :root{
+    --bg1:#07162b; --bg2:#05213f; --panel:#0b335d; --accent:#1e90ff; --muted:#bcd8ff;
+  }
+  html,body{height:100%; margin:0; font-family:Inter,Arial,Helvetica,sans-serif; background:linear-gradient(180deg,var(--bg1),var(--bg2)); color:#eaf4ff}
+  header{display:flex;gap:12px;align-items:center;padding:12px;position:sticky;top:0;background:linear-gradient(90deg,rgba(0,0,0,0.12),rgba(255,255,255,0.02));box-shadow:0 2px 8px rgba(0,0,0,0.3);z-index:40}
+  h1{margin:0;font-size:18px}
+  #topRight{margin-left:auto;display:flex;gap:8px;align-items:center}
+  input,select,button{font-size:14px;padding:8px;border-radius:8px;border:0;outline:none}
+  button{background:var(--accent);color:white;cursor:pointer}
+  button.secondary{background:rgba(255,255,255,0.06); color:var(--muted)}
+  main{display:grid;grid-template-columns: 1fr 420px; gap:12px;padding:12px;max-width:1300px;margin:0 auto}
+  #mapCard{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(0,0,0,0.08));border-radius:12px;padding:8px;min-height:520px}
+  #side{display:flex;flex-direction:column;gap:12px}
+  .panel{background:rgba(255,255,255,0.03); border-radius:12px;padding:10px;box-shadow:0 6px 18px rgba(0,0,0,0.4)}
+  #fleetList{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow:auto}
+  .planeRow{display:flex;gap:8px;align-items:center;background:rgba(255,255,255,0.02);padding:8px;border-radius:8px}
+  .pill{background:rgba(255,255,255,0.03);padding:4px 8px;border-radius:999px;font-size:12px;color:var(--muted)}
+  canvas#map{width:100%;height:480px;border-radius:8px;display:block;background:linear-gradient(#0b2b51,#06304e)}
+  #log{height:160px;overflow:auto;background:rgba(255,255,255,0.02);padding:8px;border-radius:8px}
+  .muted{color:var(--muted);font-size:13px}
+  .small{font-size:13px;color:var(--muted)}
+  footer{padding:12px;text-align:center;color:var(--muted)}
+  /* responsive */
+  @media (max-width:980px){ main{grid-template-columns:1fr; padding:10px} canvas#map{height:320px} }
+</style>
+</head>
+<body>
+<header>
+  <h1>Airline Manager -- Deluxe</h1>
+
+  <div id="startupFields" style="display:flex;gap:8px;align-items:center;margin-left:12px">
+    <input id="companyName" placeholder="Назва авіакомпанії" style="width:220px"/>
+    <select id="baseSelect">
+      <option value="">Оберіть базу</option>
+    </select>
+    <button id="startBtn">Старт</button>
+  </div>
+
+  <div id="topRight">
+    <div class="muted">Баланс: $<span id="money">1,000,000</span></div>
+    <div class="muted">Компанія: <strong id="companyLabel">--</strong></div>
+  </div>
+</header>
+
+<main>
+  <div id="mapCard" class="panel">
+    <canvas id="map"></canvas>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+      <div class="small muted">Легенда:</div>
+      <div class="pill">🟢 активний</div>
+      <div class="pill" style="background:#ff9933;color:#3b1d00">🟠 пошкоджений</div>
+      <div class="pill" style="background:#ffd400;color:#3b1d00">🟡 в ремонті</div>
+      <div class="pill" style="background:#ff6b6b;color:#3b1d00">🔴 втрачений</div>
+    </div>
+  </div>
+
+  <aside id="side">
+    <div class="panel">
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="aircraftCatalog"></select>
+        <button id="buyBtn">Купити</button>
+      </div>
+      <div class="small muted" style="margin-top:8px">Купіть літак -- він зʼявиться у флоті. Маленькі літаки не долітають до далеких напрямків.</div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin:0 0 8px 0">Флот</h3>
+      <div id="fleetList"></div>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin:0 0 8px 0">Журнал подій</h3>
+      <div id="log"></div>
+    </div>
+  </aside>
+</main>
+
+<footer>Симуляція локальна -- все зберігається у пам'яті сторінки.</footer>
+
+<script>
+/* ====== Конфіг і дані ====== */
+const STARTING_CASH = 1000000;
+let money = STARTING_CASH;
+let companyName = "";
+let base = "";
+
+const aircraftCatalog = {
+  L410:  { name:"Let L-410",       price:250000,  range:  800, seats:19 },
+  Q400:  { name:"Dash 8 Q400",     price:450000,  range: 1400, seats:78 },
+  ATR72: { name:"ATR-72",          price:500000,  range: 1500, seats:72 },
+  CRJ9:  { name:"CRJ-900",         price:600000,  range: 2500, seats:90 },
+  E190:  { name:"Embraer E190",    price:700000,  range: 3000, seats:100 },
+  A320:  { name:"Airbus A320",     price:900000,  range: 5000, seats:150 },
+  B737:  { name:"Boeing 737-800",  price:950000,  range: 5500, seats:160 },
+  A321N: { name:"Airbus A321neo",  price:1200000, range: 6500, seats:200 },
+  A330:  { name:"Airbus A330",     price:1400000, range:12000, seats:260 },
+  B787:  { name:"Boeing 787",      price:2000000, range:15500, seats:280 },
+  A350:  { name:"Airbus A350",     price:2400000, range:16000, seats:300 },
+  B77X:  { name:"Boeing 777X",     price:2800000, range:17500, seats:350 }
+};
+
+const airports = {
+  KBP:{name:"Київ (KBP)", x:0.63,y:0.38},
+  LWO:{name:"Львів (LWO)", x:0.59,y:0.37},
+  ODS:{name:"Одеса (ODS)", x:0.64,y:0.45},
+  HRK:{name:"Харків (HRK)",x:0.68,y:0.40},
+  DNK:{name:"Дніпро (DNK)",x:0.66,y:0.42},
+
+  WAR:{name:"Варшава", x:0.57,y:0.35, distance:800},
+  BER:{name:"Берлін",  x:0.54,y:0.35, distance:1300},
+  LON:{name:"Лондон",  x:0.48,y:0.33, distance:2400},
+  PAR:{name:"Париж",   x:0.50,y:0.35, distance:2300},
+  MAD:{name:"Мадрид",  x:0.47,y:0.38, distance:2700},
+  ROM:{name:"Рим",     x:0.56,y:0.43, distance:1800},
+  IST:{name:"Стамбул", x:0.64,y:0.48, distance:1050},
+  DXB:{name:"Дубай",   x:0.74,y:0.56, distance:3500},
+  DOH:{name:"Доха",    x:0.73,y:0.57, distance:3600},
+  CAI:{name:"Каїр",    x:0.63,y:0.57, distance:2600},
+  JFK:{name:"Нью-Йорк",x:0.18,y:0.40, distance:7500},
+  NRT:{name:"Токіо",   x:0.93,y:0.45, distance:8200},
+  HKG:{name:"Гонконг", x:0.88,y:0.55, distance:7800},
+  SYD:{name:"Сідней",  x:0.95,y:0.86, distance:15000},
+  SIN:{name:"Сінгапур",x:0.86,y:0.66, distance:9000},
+  LAX:{name:"Лос-Анджелес",x:0.08,y:0.46,distance:10000}
+};
+
+// прибуток ~ від distance * коеф
+function profitFor(distanceKm){ return Math.round(distanceKm * 120); } // 800km ~ 96k
+
+// час польоту: 800 km = 5s
+function flightTimeMs(distanceKm){ return Math.max(1000, (distanceKm/800) * 5000); }
+
+/* ====== Стан гри ====== */
+let fleet = []; // масив об'єктів літаків
+// літак: {id,type,name,range,seats,price,route,status,progress,timer,damage}
+
+const logEl = document.getElementById('log');
+const moneyEl = document.getElementById('money');
+const companyLabel = document.getElementById('companyLabel');
+
+/* ====== UI ініціалізація ====== */
+const baseSelect = document.getElementById('baseSelect');
+Object.entries(airports).forEach(([code,a])=>{
+  // only show bases with no distance? We want both base candidates and destinations.
+  // put local bases first
+  const opt = document.createElement('option'); opt.value = code; opt.textContent = a.name + (a.distance ? ` -- ${a.distance}км` : '');
+  baseSelect.appendChild(opt);
+});
+
+const acCatalogSel = document.getElementById('aircraftCatalog');
+Object.entries(aircraftCatalog).forEach(([code,a])=>{
+  const o = document.createElement('option'); o.value=code;
+  o.textContent = `${a.name} -- $${a.price.toLocaleString()} • ${a.range}км • ${a.seats} місць`;
+  acCatalogSel.appendChild(o);
+});
+
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  const nm = document.getElementById('companyName').value.trim();
+  const b = baseSelect.value;
+  if(!nm) return alert('Введіть назву авіакомпанії');
+  if(!b) return alert('Оберіть базу');
+  companyName = nm; base = b;
+  companyLabel.textContent = companyName;
+  document.getElementById('startupFields').style.display = 'none';
+  pushLog(`Гра розпочата -- ${companyName}, база ${airports[base].name}`);
+  renderFleetUI();
+});
+
+/* купити */
+document.getElementById('buyBtn').addEventListener('click', ()=>{
+  const type = acCatalogSel.value;
+  if(!type) return alert('Оберіть тип літака');
+  const spec = aircraftCatalog[type];
+  if(money < spec.price) return alert('Недостатньо коштів');
+  money -= spec.price; updateMoney();
+  const plane = {
+    id: Date.now() + Math.floor(Math.random()*9999),
+    type, name: spec.name, range: spec.range, seats: spec.seats, price: spec.price,
+    route: "", status:"idle", progress:0, timer:null, damage:null,
+    map:{from:base,to:"",t:0}
+  };
+  fleet.push(plane);
+  pushLog(`Куплено ${plane.name} (${plane.type}) за $${spec.price.toLocaleString()}`);
+  renderFleetUI();
+});
+
+/* ====== Події / журнал ====== */
+function pushLog(text){
+  const t = new Date();
+  const hh = t.getHours().toString().padStart(2,'0');
+  const mm = t.getMinutes().toString().padStart(2,'0');
+  const ss = t.getSeconds().toString().padStart(2,'0');
+  const line = `${hh}:${mm}:${ss} -- ${text}`;
+  const div = document.createElement('div'); div.textContent = line;
+  logEl.prepend(div);
+  // trim
+  while(logEl.childNodes.length > 400) logEl.removeChild(logEl.lastChild);
+}
+
+/* ====== Польоти і інциденти ====== */
+function rollIncident(){
+  const r = Math.random();
+  if (r < 0.82) return null;
+  const types = ["Відмова двигуна","Гідросистема","Пошкодження шасі","Електросистема","Bird strike","Декомпресія"];
+  const type = types[Math.floor(Math.random()*types.length)];
+  if (r < 0.96){
+    const severity = Math.random() < 0.7 ? "незначна" : "серйозна";
+    return {type, severity, crash:false};
+  }
+  return {type, severity:"критична", crash:true};
+}
+
+function startAutoFlight(plane){
+  if(!plane.route || plane.status==="lost" || plane.status==="repair" || plane.status==="damaged") return;
+  const ap = airports[plane.route];
+  if(!ap || !ap.distance) { pushLog(`${plane.name}: некоректний маршрут`); return; }
+  if(ap.distance > plane.range){ pushLog(`${plane.name}: не може долетіти до ${ap.name}`); return; }
+
+  plane.status = "flying";
+  plane.progress = 0;
+  plane.map.from = base; plane.map.to = plane.route; plane.map.t = 0;
+  const dur = flightTimeMs(ap.distance);
+  const stepMs = 100;
+  const steps = Math.max(1, Math.floor(dur/stepMs));
+  const inc = 100/steps;
+
+  clearInterval(plane.timer);
+  plane.timer = setInterval(()=>{
+    if(plane.status !== "flying"){ clearInterval(plane.timer); return; }
+    plane.progress += inc;
+    plane.map.t = Math.min(1, plane.progress/100);
+    updatePlaneBar(plane.id, plane.progress);
+    if(plane.progress >= 100){
+      clearInterval(plane.timer);
+      plane.progress = 100; updatePlaneBar(plane.id,100);
+      const incident = rollIncident();
+      if(incident && incident.crash){
+        plane.status="lost";
+        pushLog(`💥 Катастрофа: ${plane.name} на маршруті ${airports[plane.route].name} -- ${incident.type} (критична). Літак втрачено.`);
+        // прибрати літак
+        fleet = fleet.filter(p=>p.id!==plane.id);
+        renderFleetUI();
+        return;
+      }
+      if(incident){
+        // пошкодження
+        const baseCost = plane.price || 1000000;
+        const repairCost = incident.severity==="незначна" ? Math.round(baseCost*0.1) : Math.round(baseCost*0.25);
+        const repairTimeSec = incident.severity==="незначна" ? 8 : 18;
+        plane.status="damaged";
+        plane.damage = { type:incident.type, severity:incident.severity, repairCost, repairTimeSec, until:0 };
+        pushLog(`🚨 ${plane.name} пошкоджено (${incident.type}, ${incident.severity}). Ремонт $${repairCost.toLocaleString()} (${repairTimeSec}s)`);
+        renderFleetUI();
+        return;
+      }
+      // успішний рейс
+      const prof = profitFor(ap.distance);
+      money += prof; updateMoney();
+      pushLog(`✈️ ${plane.name} завершив рейс ${airports[plane.route].name} -- прибуток $${prof.toLocaleString()}`);
+      plane.progress = 0; plane.map.t = 0;
+      // автоматично стартує знову
+      setTimeout(()=>{ if(plane.status === "flying" || plane.status === "idle") startAutoFlight(plane); }, 600);
+    }
+  }, stepMs);
+}
+
+/* Ремонт */
+function beginRepair(plane){
+  if(!plane.damage) return alert('Немає пошкоджень');
+  if(money < plane.damage.repairCost) return alert('Недостатньо коштів на ремонт');
+  money -= plane.damage.repairCost; updateMoney();
+  plane.status = "repair";
+  const until = Date.now() + plane.damage.repairTimeSec*1000;
+  plane.damage.until = until;
+  pushLog(`🔧 Ремонт ${plane.name} розпочато -- $${plane.damage.repairCost.toLocaleString()} (${plane.damage.repairTimeSec}s)`);
+  renderFleetUI();
+
+  const tick = setInterval(()=>{
+    const left = Math.max(0, Math.ceil((until - Date.now())/1000));
+    const el = document.getElementById(`repairLeft-${plane.id}`);
+    if(el) el.textContent = `${left}s`;
+    if(left <= 0){
+      clearInterval(tick);
+      plane.status = "idle";
+      plane.damage = null;
+      plane.progress = 0;
+      pushLog(`✅ Ремонт завершено: ${plane.name}`);
+      renderFleetUI();
+      if(plane.route) startAutoFlight(plane);
+    }
+  }, 300);
+}
+
+/* Продати */
+function sellPlane(plane){
+  if(!confirm(`Продати ${plane.name} за $${Math.round((plane.price||0)*0.5).toLocaleString()}?`)) return;
+  money += Math.round((plane.price||0)*0.5); updateMoney();
+  fleet = fleet.filter(p=>p.id!==plane.id);
+  pushLog(`Продано ${plane.name} (50% від ціни)`);
+  renderFleetUI();
+}
+
+/* ====== UI рендер флоту ====== */
+function renderFleetUI(){
+  const container = document.getElementById('fleetList');
+  container.innerHTML = "";
+  fleet.forEach(plane=>{
+    const div = document.createElement('div'); div.className='planeRow';
+    const statusText = plane.status==="flying" ? 'у польоті' : plane.status==="damaged" ? 'пошкоджений' : plane.status==="repair" ? 'в ремонті' : 'на базі';
+    div.innerHTML = `
+      <div style="flex:1">
+        <div style="display:flex;gap:8px;align-items:center">
+          <strong>${plane.name}</strong>
+          <span class="pill">${plane.range}км</span>
+        </div>
+        <div class="small muted">Статус: <strong>${statusText}</strong></div>
+        <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+          <select id="route-${plane.id}" style="min-width:170px">
+            <option value="">-- обрати напрямок --</option>
+            ${Object.entries(airports).filter(([k,a])=>a.distance).map(([k,a])=>{
+              const disabled = a.distance > plane.range ? 'disabled' : '';
+              return `<option value="${k}" ${plane.route===k?'selected':''} ${disabled}>${a.name} -- ${a.distance}км -- приб: $${profitFor(a.distance).toLocaleString()}</option>`;
+            }).join('')}
+          </select>
+          <button id="repair-${plane.id}" class="secondary">Ремонт</button>
+          <button id="sell-${plane.id}" class="secondary">Продати</button>
+        </div>
+        <div style="height:8px;background:rgba(255,255,255,0.06);border-radius:6px;margin-top:6px;overflow:hidden">
+          <div id="bar-${plane.id}" style="height:100%;width:${plane.progress}%;background:${plane.status==='flying'?'limegreen':plane.status==='damaged'?'#ff9933':plane.status==='repair'?'#ffd400':'#6aa1ff'}"></div>
+        </div>
+        ${plane.status==='damaged' && plane.damage ? `<div class="small muted">🚨 ${plane.damage.type} (${plane.damage.severity}) -- ремонт $${plane.damage.repairCost.toLocaleString()} • <span id="repairLeft-${plane.id}">${plane.damage.repairTimeSec}s</span></div>` : ''}
+      </div>
+    `;
+    container.appendChild(div);
+
+    // events
+    const routeSel = div.querySelector(`#route-${plane.id}`);
+    routeSel.addEventListener('change', ()=>{
+      const code = routeSel.value;
+      if(!code){ plane.route=""; plane.progress=0; plane.status="idle"; updatePlaneBar(plane.id,0); return; }
+      const ap = airports[code];
+      if(!ap || !ap.distance){ alert('Неправильний маршрут'); return; }
+      if(ap.distance > plane.range){ alert(`${plane.name} не долетить (${ap.distance}км > ${plane.range}км)`); routeSel.value=''; return; }
+      plane.route = code;
+      pushLog(`${plane.name} призначено на маршрут ${airports[code].name} (${ap.distance}км)`);
+      if(plane.status === 'idle') startAutoFlight(plane);
+      renderFleetUI();
+    });
+
+    const repairBtn = div.querySelector(`#repair-${plane.id}`);
+    repairBtn.addEventListener('click', ()=> {
+      if(!plane.damage) return alert('Немає пошкоджень');
+      if(plane.status==='repair') return alert('Вже в ремонті');
+      beginRepair(plane);
+    });
+
+    const sellBtn = div.querySelector(`#sell-${plane.id}`);
+    sellBtn.addEventListener('click', ()=> sellPlane(plane));
+  });
+}
+
+/* оновлення бару */
+function updatePlaneBar(id,pct){
+  const el = document.getElementById(`bar-${id}`);
+  if(el) el.style.width = Math.min(100, Math.max(0, pct)) + '%';
+}
+
+/* оновити гроші */
+function updateMoney(){ moneyEl.textContent = money.toLocaleString(); }
+
+/* ====== Карта: відмалювати літаки та аеропорти ====== */
+const canvas = document.getElementById('map');
+const ctx = canvas.getContext('2d');
+function resizeCanvas(){ canvas.width = canvas.clientWidth * devicePixelRatio; canvas.height = canvas.clientHeight * devicePixelRatio; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function draw(){
+  // фон
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+
+  // простий матрикс материків (ціль - виглядно)
+  ctx.fillStyle = '#0b3056';
+  ctx.fillRect(0,0,w,h);
+
+  // draw airports (destinations with distance)
+  Object.entries(airports).forEach(([code,a])=>{
+    const x = a.x * w, y = a.y * h;
+    // dot
+    ctx.beginPath(); ctx.fillStyle = a.distance ? '#ffd400' : '#79c7ff'; ctx.arc(x,y,4,0,Math.PI*2); ctx.fill();
+    // label (small)
+    ctx.fillStyle = '#fff'; ctx.font = '12px Arial';
+    ctx.fillText(a.name, x + 6, y - 6);
+  });
+
+  // draw lines from base to destinations
+  const b = airports[base];
+  if(b){
+    const bx = b.x * w, by = b.y * h;
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+    Object.entries(airports).forEach(([code,a])=>{
+      if(!a.distance) return;
+      const ax = a.x*w, ay = a.y*h;
+      ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(ax,ay); ctx.stroke();
+    });
+  }
+
+  // draw planes as moving dots
+  fleet.forEach(p=>{
+    if(!p.route) return;
+    const from = airports[p.map.from] || airports[base];
+    const to = airports[p.map.to];
+    const fx = (from.x || 0.6) * w, fy = (from.y || 0.4) * h;
+    const tx = (to.x || 0.6) * w, ty = (to.y || 0.4) * h;
+    const t = p.map.t || (p.progress/100) || 0;
+    const x = fx + (tx-fx) * t;
+    const y = fy + (ty-fy) * t;
+    ctx.beginPath();
+    ctx.fillStyle = p.status === 'damaged' ? '#ff9933' : p.status === 'repair' ? '#ffd400' : '#00ff9c';
+    ctx.arc(x,y,6,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#002'; ctx.font = '10px Arial';
+    ctx.fillText(p.type, x+8, y+4);
+  });
+
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+/* ====== init UI render ====== */
+updateMoney();
+renderFleetUI();
+pushLog('Готово -- введіть назву компанії та оберіть базу щоб почати');
+</script>
+</body>
+</html>
